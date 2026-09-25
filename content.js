@@ -1,5 +1,6 @@
 // Waypoints: navigation, saved messages and send times for claude.ai.
 // Everything runs on this page and is stored in your browser only.
+// Works in Chrome, Edge, Brave and other Chromium browsers, and in Firefox.
 
 (() => {
   'use strict';
@@ -16,12 +17,31 @@
   };
   const SEND_LABEL = /\b(send|save|submit|enviar|guardar)\b/i; // buttons that send a message
 
+  // ---- Keyboard shortcuts -------------------------------------------------------
+  // A shortcut is a physical key (KeyboardEvent.code, so it works the same with any keyboard
+  // layout) plus modifiers. They can be changed in Settings → Shortcuts.
+  const ACTIONS = [
+    { id: 'prev', label: 'Previous of your messages', repeat: true },
+    { id: 'next', label: 'Next of your messages', repeat: true },
+    { id: 'save', label: 'Save or unsave the current message' },
+    { id: 'panel', label: 'Open or close the panel' },
+  ];
+  const DEFAULT_KEYS = {
+    prev: { code: 'ArrowUp', ctrl: false, alt: true, shift: false, meta: false },
+    next: { code: 'ArrowDown', ctrl: false, alt: true, shift: false, meta: false },
+    save: { code: 'KeyS', ctrl: false, alt: true, shift: true, meta: false },
+    panel: { code: 'KeyP', ctrl: false, alt: true, shift: true, meta: false },
+  };
+  const MOD_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+    'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'CapsLock', 'Fn', 'FnLock']);
+  const IS_MAC = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
+
   const DEFAULT_SETTINGS = { rail: true, hoverOpen: true, chip: true, hour12: false, pinned: false };
   const PENDING_MS = 60 * 1000;   // a send counts for a new message appearing within this time
   const JUMP_MS = 30 * 1000;      // how long a new tab keeps trying to find a saved message
 
   const S = {
-    settings: { ...DEFAULT_SETTINGS },
+    settings: mergeSettings(null),
     chatId: undefined,   // current chat id (null on pages that aren't a chat)
     rec: null,           // stored record for this chat: { title, updated, msgs: [{h, n, t, s}] }
     stamps: new Map(),   // "hash.n" -> stored message, for this chat
@@ -37,6 +57,20 @@
     historyLimit: 150,
   };
 
+  // Settings as stored, completed with defaults (including shortcuts added in later versions).
+  function mergeSettings(stored) {
+    const st = stored && typeof stored === 'object' ? stored : {};
+    const keys = { ...DEFAULT_KEYS };
+    if (st.keys && typeof st.keys === 'object') {
+      for (const a of ACTIONS) {
+        if (!(a.id in st.keys)) continue;
+        const c = st.keys[a.id];
+        keys[a.id] = c && typeof c.code === 'string' && c.code ? c : null; // null: no shortcut
+      }
+    }
+    return { ...DEFAULT_SETTINGS, ...st, keys };
+  }
+
   // ---- Helpers -------------------------------------------------------------------
 
   function h(tag, attrs = {}, ...kids) {
@@ -45,7 +79,6 @@
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
       else if (k === 'text') el.textContent = v;
-      else if (k === 'html') el.innerHTML = v; // only used with the static icons below
       else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
       else el.setAttribute(k, v === true ? '' : v);
     }
@@ -86,14 +119,40 @@
   }
   const fmtFull = t => `${dayLabel(t)}, ${fmtTime(t)}`;
 
-  const ICON = {
-    nav: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>',
-    mark: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z"/></svg>',
-    marked: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z"/></svg>',
-    pin: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3z"/></svg>',
-    panel: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg>',
-    close: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  // ---- Icons ---------------------------------------------------------------------------
+  // Built as SVG elements (no HTML strings), each: [size, svg attributes, [child tag, attributes]...].
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const LINE = { fill: 'none', stroke: 'currentColor', 'stroke-width': 2 };
+  const BOOKMARK = 'M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z';
+  const DOT = { r: 1.3, fill: 'currentColor', stroke: 'none' };
+  const ICONS = {
+    nav: [15, { ...LINE, 'stroke-linecap': 'round' }, [
+      ['path', { d: 'M9 6h11M9 12h11M9 18h11' }],
+      ['circle', { cx: 4.5, cy: 6, ...DOT }],
+      ['circle', { cx: 4.5, cy: 12, ...DOT }],
+      ['circle', { cx: 4.5, cy: 18, ...DOT }],
+    ]],
+    mark: [14, { ...LINE, 'stroke-linejoin': 'round' }, [['path', { d: BOOKMARK }]]],
+    marked: [14, { ...LINE, fill: 'currentColor', 'stroke-linejoin': 'round' }, [['path', { d: BOOKMARK }]]],
+    pin: [14, { ...LINE, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [['path', { d: 'M12 17v4M8 3h8l-1 6 3 3v2H6v-2l3-3z' }]]],
+    panel: [14, LINE, [['rect', { x: 3.5, y: 4.5, width: 17, height: 15, rx: 2.5 }], ['path', { d: 'M14.5 4.5v15' }]]],
+    close: [16, { ...LINE, 'stroke-linecap': 'round' }, [['path', { d: 'M6 6l12 12M18 6L6 18' }]]],
   };
+
+  function icon(name) {
+    const [size, attrs, parts] = ICONS[name];
+    const set = (el, a) => { for (const [k, v] of Object.entries(a)) el.setAttribute(k, v); };
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    set(svg, { viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': 'true', ...attrs });
+    for (const [tag, a] of parts) {
+      const el = document.createElementNS(SVG_NS, tag);
+      set(el, a);
+      svg.append(el);
+    }
+    return svg;
+  }
+  const markIcon = saved => icon(saved ? 'marked' : 'mark');
 
   // ---- Reading your messages ----------------------------------------------------------
 
@@ -183,7 +242,7 @@
     } else {
       const prev = S.prevList;
       if (prev && prev.length && list.length === prev.length + 1 &&
-          list[list.length - 2].key === prev[prev.length - 1].key) t = Date.now();
+        list[list.length - 2].key === prev[prev.length - 1].key) t = Date.now();
     }
     if (!t) return;
     S.pending = null;
@@ -300,6 +359,143 @@
     refreshAll();
   }
 
+  // ---- Shortcuts -------------------------------------------------------------------------------
+
+  const comboOf = e => ({ code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+  const sameCombo = (a, b) => !!a && !!b && a.code === b.code &&
+    !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift && !!a.meta === !!b.meta;
+  // AltGr (used for @, #, € on many keyboards) shows up as Ctrl+Alt on Windows: never a shortcut.
+  const altGr = e => !!(e.getModifierState && e.getModifierState('AltGraph'));
+
+  const KEY_NAMES = {
+    ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'Space', Enter: 'Enter',
+    Backspace: 'Backspace', Tab: 'Tab', Escape: 'Esc', Delete: 'Delete', Insert: 'Insert',
+    Home: 'Home', End: 'End', PageUp: 'Page Up', PageDown: 'Page Down',
+    Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', IntlBackslash: '<',
+    Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+    NumpadAdd: 'Num +', NumpadSubtract: 'Num -', NumpadMultiply: 'Num *', NumpadDivide: 'Num /',
+    NumpadDecimal: 'Num .', NumpadEnter: 'Num Enter',
+  };
+  function keyName(code) {
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit\d$/.test(code)) return code.slice(5);
+    if (/^Numpad\d$/.test(code)) return 'Num ' + code.slice(6);
+    return KEY_NAMES[code] || code;
+  }
+
+  function comboParts(c) {
+    const p = [];
+    if (IS_MAC) {
+      if (c.ctrl) p.push('⌃');
+      if (c.alt) p.push('⌥');
+      if (c.shift) p.push('⇧');
+      if (c.meta) p.push('⌘');
+    } else {
+      if (c.ctrl) p.push('Ctrl');
+      if (c.alt) p.push('Alt');
+      if (c.shift) p.push('Shift');
+      if (c.meta) p.push('Meta');
+    }
+    if (c.code) p.push(keyName(c.code));
+    return p;
+  }
+
+  function comboNodes(c) {
+    const out = [];
+    comboParts(c).forEach((part, i) => {
+      if (i && !IS_MAC) out.push(' + ');
+      out.push(h('kbd', { text: part }));
+    });
+    return out;
+  }
+
+  // Returns true when the shortcut did something (only then is the key kept from Claude).
+  function runAction(id) {
+    if (id === 'prev' || id === 'next') {
+      const i = currentTarget(id === 'prev' ? -1 : 1);
+      if (i === -1) return false;
+      jumpTo(i);
+      return true;
+    }
+    if (id === 'save') {
+      if (!S.list.length) return false;
+      toggleSave(Math.max(0, S.active));
+      return true;
+    }
+    if (id === 'panel') {
+      if (drawerOpen()) closeDrawer(); else openDrawer();
+      return true;
+    }
+    return false;
+  }
+
+  // Recording a new shortcut in Settings.
+  let recording = null; // { id, btn }
+
+  function startRecording(id, btn) {
+    if (recording) stopRecording();
+    recording = { id, btn };
+    btn.classList.add('recording');
+    btn.textContent = 'Press keys…';
+    btn.focus();
+  }
+
+  function stopRecording() {
+    if (!recording) return;
+    const { id, btn } = recording;
+    recording = null;
+    btn.classList.remove('recording');
+    showCombo(btn, S.settings.keys[id]);
+  }
+
+  function showCombo(btn, c) {
+    btn.textContent = '';
+    if (c) btn.append(...comboNodes(c));
+    else btn.append(h('span', { class: 'unset', text: 'Not set' }));
+  }
+
+  // While modifiers are held, show them: "Alt + Shift + …".
+  function showPartial(btn, e) {
+    const mods = { code: '', ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+    btn.textContent = '';
+    if (mods.ctrl || mods.alt || mods.shift || mods.meta) btn.append(...comboNodes(mods), IS_MAC ? ' …' : ' + …');
+    else btn.textContent = 'Press keys…';
+  }
+
+  function recordKey(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const { id, btn } = recording;
+    const plain = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+    if (e.key === 'Escape' && plain) { stopRecording(); return; }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && plain) { assignKey(id, null); return; }
+    if (e.repeat) return;
+    if (altGr(e)) { btn.textContent = 'AltGr can’t be used'; return; }
+    if (!e.code || MOD_CODES.has(e.code)) { showPartial(btn, e); return; }
+    if (!e.ctrlKey && !e.altKey && !e.metaKey) { btn.textContent = IS_MAC ? 'Add ⌥, ⌃ or ⌘' : 'Add Alt or Ctrl'; return; }
+    assignKey(id, comboOf(e));
+  }
+
+  function assignKey(id, combo) {
+    const keys = { ...S.settings.keys, [id]: combo };
+    if (combo) {
+      for (const a of ACTIONS) {
+        if (a.id !== id && sameCombo(keys[a.id], combo)) {
+          keys[a.id] = null;
+          toast(`Removed that shortcut from “${a.label}”`);
+        }
+      }
+    }
+    recording = null;
+    setSetting('keys', keys);
+  }
+
+  function resetKeys() {
+    recording = null;
+    setSetting('keys', { ...DEFAULT_KEYS });
+    toast('Shortcuts reset');
+  }
+
   // ---- Interface ------------------------------------------------------------------------------
 
   const CSS = `
@@ -385,7 +581,16 @@ input { font:inherit; color:var(--text); }
 .btn:hover { border-color:var(--muted); }
 .btn.danger { color:#c2333a; }
 kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px solid var(--line); border-radius:4px; background:var(--bg2); }
-.keys { color:var(--muted); line-height:1.9; }
+.krow { display:flex; align-items:center; gap:10px; padding:4px 0; }
+.kbtn, .kfixed { flex:none; min-width:124px; min-height:28px; padding:3px 8px; border:1px solid var(--line); border-radius:8px;
+  text-align:center; white-space:nowrap; color:var(--muted); font-size:12px; }
+.kfixed { border-style:dashed; display:inline-flex; align-items:center; justify-content:center; }
+.kbtn { background:var(--bg2); }
+.kbtn:hover { border-color:var(--muted); color:var(--text); }
+.kbtn kbd { background:var(--bg); }
+.kbtn.recording { border-color:var(--accent); background:var(--soft); color:var(--text); }
+.kbtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.unset { font-style:italic; }
 
 .chip { position:fixed; display:flex; align-items:center; gap:2px; height:26px; padding:0 2px 0 9px; background:var(--bg);
   border:1px solid var(--line); border-radius:13px; box-shadow:0 2px 10px rgba(0,0,0,.08); color:var(--muted);
@@ -400,16 +605,20 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
   let ui = null;
 
   function buildUI() {
+    // Remove a panel left behind by an earlier copy of Waypoints. Firefox starts the new version
+    // in open tabs when it updates, but the old version's elements stay on the page.
+    for (const old of document.querySelectorAll('#waypoints-root')) old.remove();
+
     const host = h('div', { id: 'waypoints-root' });
     host.style.cssText = 'all:initial; position:fixed; top:0; left:0; width:0; height:0; z-index:2147483000;';
     const root = host.attachShadow({ mode: 'open' });
 
-    const head = h('button', { class: 'head', title: 'Waypoints: saved messages, history and settings', html: ICON.nav });
+    const head = h('button', { class: 'head', title: 'Waypoints: saved messages, history and settings' }, icon('nav'));
     const ticks = h('div', { class: 'ticks' });
     const litems = h('div', { class: 'litems' });
     const lcount = h('span', { class: 'grow' });
-    const pinBtn = h('button', { class: 'icon', title: 'Keep this list open', html: ICON.pin });
-    const panelBtn = h('button', { class: 'icon', title: 'Open the Waypoints panel', html: ICON.panel });
+    const pinBtn = h('button', { class: 'icon', title: 'Keep this list open' }, icon('pin'));
+    const panelBtn = h('button', { class: 'icon', title: 'Open the Waypoints panel' }, icon('panel'));
     const list = h('div', { class: 'list' }, h('div', { class: 'lhead' }, lcount, pinBtn, panelBtn), litems);
     const rail = h('div', { class: 'rail' }, head, ticks, list);
 
@@ -419,7 +628,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
         (tabs[k] = h('button', { class: 'tab', 'data-tab': k }, label, h('span', { class: 'count' })))));
     const search = h('input', { class: 'search', type: 'search', placeholder: 'Search' });
     const dbody = h('div', { class: 'dbody' });
-    const closeBtn = h('button', { class: 'icon', title: 'Close (Esc)', html: ICON.close });
+    const closeBtn = h('button', { class: 'icon', title: 'Close (Esc)' }, icon('close'));
     const drawer = h('div', { class: 'drawer' },
       h('div', { class: 'dhead' }, h('span', { class: 'dtitle', text: 'Waypoints' }), closeBtn), tabBar, search, dbody);
 
@@ -432,8 +641,10 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     // Keep typing in the panel (search, notes) from reaching Claude's own shortcuts.
     for (const type of ['keydown', 'keyup', 'keypress']) root.addEventListener(type, e => e.stopPropagation());
     document.documentElement.append(host);
-    ui = { host, root, rail, head, ticks, list, litems, lcount, pinBtn, panelBtn, drawer, tabs, search, dbody, closeBtn,
-      chip, chipTime, chipMark, toastEl };
+    ui = {
+      host, root, rail, head, ticks, list, litems, lcount, pinBtn, panelBtn, drawer, tabs, search, dbody, closeBtn,
+      chip, chipTime, chipMark, toastEl
+    };
 
     // Rail
     head.addEventListener('click', () => (drawerOpen() ? closeDrawer() : openDrawer()));
@@ -500,7 +711,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     ui.chipTime.textContent = e ? fmtTime(e.t) : '';
     ui.chip.title = e ? 'Sent ' + fmtFull(e.t) : 'Sent before Waypoints was installed';
     ui.chip.classList.toggle('notime', !e);
-    ui.chipMark.innerHTML = saved ? ICON.marked : ICON.mark;
+    ui.chipMark.replaceChildren(markIcon(saved));
     ui.chipMark.className = 'mark' + (saved ? ' saved' : '');
     ui.chipMark.title = saved ? 'Remove from saved' : 'Save this message';
     ui.chip.hidden = false;
@@ -564,7 +775,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
         h('span', { class: 'num', text: i + 1 }),
         h('span', { class: 'txt', text: m.text }),
         h('span', { class: 'time', text: e ? fmtTime(e.t) : '' }),
-        h('button', { class: 'mark' + (saved ? ' saved' : ''), title: saved ? 'Remove from saved' : 'Save', html: saved ? ICON.marked : ICON.mark })));
+        h('button', { class: 'mark' + (saved ? ' saved' : ''), title: saved ? 'Remove from saved' : 'Save' }, markIcon(saved))));
     });
     box.append(frag);
   }
@@ -608,7 +819,11 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     ui.drawer.classList.add('open');
     renderDrawer();
   }
-  function closeDrawer() { if (ui) ui.drawer.classList.remove('open'); }
+  function closeDrawer() {
+    if (!ui) return;
+    if (recording) stopRecording();
+    ui.drawer.classList.remove('open');
+  }
 
   const matches = (...fields) => !S.query || fields.some(f => f && f.toLowerCase().includes(S.query));
 
@@ -623,6 +838,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     ui.search.placeholder = { chat: 'Search this chat', saved: 'Search saved messages and notes', history: 'Search everything you’ve sent' }[S.tab] || '';
     const body = ui.dbody;
     const keep = body.scrollTop;
+    if (S.tab !== 'settings') recording = null;
     if (S.tab === 'chat') renderChatTab(body);
     else if (S.tab === 'saved') renderSavedTab(body);
     else if (S.tab === 'history') renderHistoryTab(body, token);
@@ -646,8 +862,10 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
         if (d !== lastDay) { frag.append(h('div', { class: 'sep', text: d })); lastDay = d; }
       }
       const saved = S.chatId && savedIndex(S.chatId, m) !== -1;
-      const mark = h('button', { class: 'mark' + (saved ? ' saved' : ''), title: saved ? 'Remove from saved' : 'Save', html: saved ? ICON.marked : ICON.mark,
-        onclick: ev => { ev.stopPropagation(); toggleSave(i); } });
+      const mark = h('button', {
+        class: 'mark' + (saved ? ' saved' : ''), title: saved ? 'Remove from saved' : 'Save',
+        onclick: ev => { ev.stopPropagation(); toggleSave(i); }
+      }, markIcon(saved));
       frag.append(h('div', { class: 'card' + (i === S.active ? ' on' : ''), onclick: () => jumpTo(i) },
         h('div', { class: 'meta' }, h('span', { class: 'grow', text: `#${i + 1}` + (e ? ` · ${fmtTime(e.t)}` : '') }), mark),
         h('div', { class: 'body', text: m.text })));
@@ -668,12 +886,14 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
       note.addEventListener('click', e => e.stopPropagation());
       note.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') note.blur(); });
       note.addEventListener('change', () => { s.note = note.value.trim(); chrome.storage.local.set({ saved: S.saved }); });
-      const remove = h('button', { class: 'mark saved', title: 'Remove from saved', html: ICON.marked, onclick: ev => {
-        ev.stopPropagation();
-        S.saved = S.saved.filter(x => x.id !== s.id);
-        chrome.storage.local.set({ saved: S.saved });
-        refreshAll();
-      } });
+      const remove = h('button', {
+        class: 'mark saved', title: 'Remove from saved', onclick: ev => {
+          ev.stopPropagation();
+          S.saved = S.saved.filter(x => x.id !== s.id);
+          chrome.storage.local.set({ saved: S.saved });
+          refreshAll();
+        }
+      }, markIcon(true));
       const here = s.chat === S.chatId;
       body.append(h('div', { class: 'card', title: here ? 'Jump to this message' : 'Open this chat in a new tab', onclick: () => goTo(s) },
         h('div', { class: 'meta' },
@@ -713,7 +933,19 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     }
   }
 
+  function shortcutRow(a) {
+    const btn = h('button', { class: 'kbtn', title: 'Click, then press the new keys' });
+    showCombo(btn, S.settings.keys[a.id]);
+    btn.addEventListener('click', () => {
+      if (recording && recording.btn === btn) stopRecording();
+      else startRecording(a.id, btn);
+    });
+    btn.addEventListener('blur', () => { if (recording && recording.btn === btn) stopRecording(); });
+    return h('div', { class: 'krow' }, h('span', { class: 'grow', text: a.label }), btn);
+  }
+
   function renderSettingsTab(body) {
+    recording = null;
     body.textContent = '';
     const box = h('div', { class: 'settings' });
     const toggle = (key, label) => {
@@ -747,6 +979,9 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
       catch { toast('That file isn’t a Waypoints backup.'); }
     });
 
+    const needs = IS_MAC ? '⌥ Option, ⌃ Control or ⌘ Command' : 'Alt or Ctrl';
+    const browserKey = IS_MAC ? '⌘T' : 'Ctrl+T';
+
     box.append(
       h('h3', { text: 'Display' }),
       toggle('rail', 'Show the message rail on the right'),
@@ -754,18 +989,24 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
       toggle('chip', 'Show the time and a save button when hovering your messages'),
       toggle('hour12', 'Use a 12-hour clock'),
       h('h3', { text: 'Shortcuts' }),
-      h('div', { class: 'keys' },
-        h('div', {}, h('kbd', { text: 'Alt' }), ' + ', h('kbd', { text: '↑' }), ' / ', h('kbd', { text: '↓' }), '  previous / next of your messages'),
-        h('div', {}, h('kbd', { text: 'Alt' }), ' + ', h('kbd', { text: 'S' }), '  save or unsave the current message'),
-        h('div', {}, h('kbd', { text: 'Esc' }), '  close this panel'),
-        h('div', {}, 'Toolbar icon  open or close this panel')),
+      ...ACTIONS.map(shortcutRow),
+      h('div', { class: 'krow' }, h('span', { class: 'grow', text: 'Close this panel' }),
+        h('span', { class: 'kfixed' }, h('kbd', { text: 'Esc' }))),
+      h('div', { class: 'krow' }, h('span', { class: 'grow', text: 'Open or close this panel from the toolbar' }),
+        h('span', { class: 'kfixed', text: 'Toolbar icon' })),
+      h('p', {
+        class: 'stats', text: `Click a shortcut, then press the new keys. It needs ${needs}. Esc cancels, Backspace removes it. ` +
+          `Shortcuts only work on claude.ai, where they take priority over Claude’s and the browser’s own. ` +
+          `Some keys, like ${browserKey}, belong to the browser and can’t be used.`
+      }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', text: 'Reset shortcuts', onclick: resetKeys })),
       h('h3', { text: 'Your data' }),
       stats,
       h('div', { class: 'btns' },
         h('button', { class: 'btn', text: 'Export backup', onclick: exportData }),
         h('button', { class: 'btn', text: 'Import backup', onclick: () => file.click() }),
         clearBtn, file),
-      h('p', { class: 'stats', text: 'Times are recorded for messages you send while Waypoints is installed. Older messages show no time.' }));
+      h('p', { class: 'stats', text: 'Times are recorded for messages you send while Waypoints is installed. Older messages show no time. Waypoints doesn’t run in private windows.' }));
     body.append(box);
   }
 
@@ -849,7 +1090,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
 
   async function init() {
     const st = await chrome.storage.local.get(['settings', 'saved', 'jump']);
-    S.settings = { ...DEFAULT_SETTINGS, ...(st.settings || {}) };
+    S.settings = mergeSettings(st.settings);
     S.saved = st.saved || [];
     if (st.jump && Date.now() - st.jump.at < JUMP_MS) S.jump = st.jump;
 
@@ -862,25 +1103,28 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
     setInterval(() => { if (chatIdFromUrl() !== S.chatId) scheduleScan(0); }, 800);
 
-    // Notice when you send a message: Enter in the message box, or a send/save button.
-    document.addEventListener('keydown', e => {
+    // Keys: recording a shortcut, noticing a send (Enter in the message box), and your shortcuts.
+    // Listening on window in the capture phase sees keys before claude.ai's own handlers do.
+    window.addEventListener('keydown', e => {
+      if (recording) { recordKey(e); return; }
       const inUI = e.target === ui.host;
       if (!inUI && e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.closest && e.target.closest(SEL.input)) {
         S.pending = { at: Date.now(), chat: chatIdFromUrl() };
         return;
       }
       if (e.key === 'Escape' && drawerOpen()) { closeDrawer(); return; }
-      if (inUI) return;
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-          const i = currentTarget(e.key === 'ArrowUp' ? -1 : 1);
-          if (i !== -1) { e.preventDefault(); e.stopPropagation(); jumpTo(i); }
-        } else if (e.code === 'KeyS' && S.list.length && !(e.target.closest && e.target.closest(SEL.input))) {
-          e.preventDefault();
-          toggleSave(Math.max(0, S.active));
-        }
-      }
+      if (inUI || e.isComposing || altGr(e)) return;
+      const c = comboOf(e);
+      const act = ACTIONS.find(a => sameCombo(S.settings.keys[a.id], c));
+      if (!act) return;
+      if (e.repeat && !act.repeat) { e.preventDefault(); e.stopPropagation(); return; }
+      if (runAction(act.id)) { e.preventDefault(); e.stopPropagation(); }
     }, true);
+    window.addEventListener('keyup', e => {
+      if (recording && MOD_CODES.has(e.code)) { e.preventDefault(); e.stopPropagation(); showPartial(recording.btn, e); }
+    }, true);
+
+    // Notice when you send a message with a send/save button.
     document.addEventListener('click', e => {
       const b = e.target.closest && e.target.closest('button');
       if (b && SEND_LABEL.test((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '').slice(0, 30))) {
@@ -891,7 +1135,7 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       if (changes.saved) S.saved = changes.saved.newValue || [];
-      if (changes.settings && changes.settings.newValue) S.settings = { ...DEFAULT_SETTINGS, ...changes.settings.newValue };
+      if (changes.settings && changes.settings.newValue) S.settings = mergeSettings(changes.settings.newValue);
       if (S.chatId && changes[ck(S.chatId)] && changes[ck(S.chatId)].newValue) {
         S.rec = changes[ck(S.chatId)].newValue;
         S.stamps = new Map(S.rec.msgs.map(m => [m.h + '.' + m.n, m]));
@@ -901,8 +1145,11 @@ kbd { font:11px ui-monospace, Menlo, monospace; padding:1px 5px; border:1px soli
       }
     });
 
-    chrome.runtime.onMessage.addListener(msg => {
-      if (msg && msg.type === 'waypoints:toggle') drawerOpen() ? closeDrawer() : openDrawer();
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.type === 'waypoints:toggle') {
+        if (drawerOpen()) closeDrawer(); else openDrawer();
+        sendResponse({ ok: true });
+      }
     });
 
     scan();
