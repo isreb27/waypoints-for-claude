@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect x="4" y="4" width="120" height="120" rx="28" fill="#C96442"/>
-  <path d="M40 30v68" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="6" stroke-linecap="round"/>
-  <circle cx="40" cy="36" r="9" fill="#FFFFFF" fill-opacity=".6"/>
-  <circle cx="40" cy="92" r="9" fill="#FFFFFF" fill-opacity=".6"/>
-  <path d="M60 50h32a4 4 0 0 1 4 4v36l-20-11-20 11V54a4 4 0 0 1 4-4z" fill="#FFFFFF"/>
-  <circle cx="40" cy="64" r="11" fill="#FFFFFF"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Waypoints for Claude. 128×128 store icon: 96×96 artwork with 16px transparent padding (Chrome Web Store spec).
+       For a full-bleed version (toolbar, 32/48px), render with viewBox="16 16 96 96". -->
+  <rect x="16" y="16" width="96" height="96" rx="22" fill="#C96442"/>
+  <!-- The rail: your messages as waypoints, the current one highlighted -->
+  <path d="M47 42v44" stroke="#FFFFFF" stroke-opacity=".45" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="47" cy="42" r="5.5" fill="#FFFFFF" fill-opacity=".7"/>
+  <circle cx="47" cy="86" r="5.5" fill="#FFFFFF" fill-opacity=".7"/>
+  <circle cx="47" cy="64" r="8.5" fill="#FFFFFF"/>
+  <!-- The bookmark: saved messages -->
+  <path d="M63 47a5 5 0 0 1 5-5h14a5 5 0 0 1 5 5v39l-12-8.5L63 86z" fill="#FFFFFF"/>
 </svg>

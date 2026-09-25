@@ -8,7 +8,9 @@ A lightweight browser extension for Chrome, Brave, Edge, other Chromium browsers
 - **History:** everything you've sent, across all chats, grouped by day and searchable.
 - **Keyboard shortcuts:** move between your messages without scrolling. You can change them.
 
-It runs only on claude.ai, uses no libraries, and does its work only when the page changes.
+It runs only on claude.ai, uses no libraries, and does its work only when the page changes. Everything stays in your browser: see the [privacy policy](PRIVACY.md).
+
+![Waypoints: the message rail and the list of your messages, with send times](store/screenshots/01-message-rail.png)
 
 **Works in:** Chrome, Edge, Brave and other Chromium browsers (version 121 or later), and Firefox for desktop (version 140 or later).
 
@@ -34,10 +36,10 @@ Firefox only keeps extensions that Mozilla has signed. Signing is free, automati
 1. Make the zip. In a terminal, inside the repository folder:
 
     ```bash
-    rm -f ../waypoints-for-claude.zip && zip -r ../waypoints-for-claude.zip manifest.json background.js content.js icons
+    rm -f ../waypoints-for-claude.zip && zip -r ../waypoints-for-claude.zip manifest.json background.js content.js icons -x "icons/*.svg"
     ```
 
-    This creates `waypoints-for-claude.zip` next to the folder. (On Windows, select those four items, not the folder itself, then right-click → **Send to → Compressed (zipped) folder**. `manifest.json` must be at the top of the zip.)
+    This creates `waypoints-for-claude.zip` next to the folder, with only the files the extension needs (the SVG icon sources and the docs stay out). (On Windows, select those four items, not the folder itself, then right-click → **Send to → Compressed (zipped) folder**. `manifest.json` must be at the top of the zip.)
 
 2. Go to the [Firefox Add-on Developer Hub](https://addons.mozilla.org/developers/) and sign in with a free Mozilla account.
 3. Click **Submit a New Add-on**, choose **On your own**, and upload the zip. If you're asked about source code, answer **No**: the code isn't minified or bundled.
@@ -105,6 +107,8 @@ Settings → **Export backup** saves everything to a file, and **Import backup**
 
 **Private windows.** Waypoints never runs in private or incognito windows, so nothing from a private session is stored.
 
+The full details are in the [privacy policy](PRIVACY.md).
+
 ## If claude.ai changes
 
 Waypoints finds your messages by how claude.ai marks them on the page. If Claude redesigns its site and the rail goes empty, only the `SEL` block at the top of `content.js` needs updating. To find the new values, right-click one of your messages → **Inspect**.
@@ -115,6 +119,10 @@ Waypoints finds your messages by how claude.ai marks them on the page. If Claude
 - **Storage (unlimited):** to keep your times, saved messages and settings. "Unlimited" only means Chrome's default 10 MB limit doesn't apply.
 
 Firefox and Chrome let you take away an extension's access to a site. If the rail disappears, click the Waypoints toolbar icon: it asks for claude.ai access again. In Firefox you can also open the puzzle-piece menu and choose **Always allow on claude.ai** for Waypoints.
+
+## Store listing
+
+Screenshots, promo images and ready-to-paste listing text for the Chrome Web Store and Firefox Add-ons are in [`store/`](store/LISTING.md).
 
 ## Disclaimer
 

@@ -1,0 +1,25 @@
+# Packaged builds: made from the repo, never committed
+*.zip
+*.xpi
+*.crx
+web-ext-artifacts/
+
+# Private signing keys (Chrome packs extensions with a .pem key: never publish it)
+*.pem
+
+# Waypoints backups contain your own messages: keep them out of the repo
+waypoints-backup-*.json
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Tooling, if ever added
+node_modules/
